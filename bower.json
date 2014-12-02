@@ -1,10 +1,11 @@
 {
   "name": "angular-mood",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "dependencies": {
     "angular": "latest",
     "d3": "latest",
-    "tinycolor": "latest"
+    "tinycolor": "latest",
+    "underscore": "latest"
   },
   "main": "angular-mood.js",
   "authors": [

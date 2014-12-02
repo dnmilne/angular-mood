@@ -10,7 +10,7 @@ angular.module('angular-mood', [])
 
 
 
-.factory('MoodGrid', function() {
+.factory('MoodData', function() {
 
 var moods = [ {
   "name" : "enraged",
@@ -478,26 +478,51 @@ var moods = [ {
     }
 
     //scale for mapping angles to colors
-    var quadrantColors = {} ;
 
-    //ne (yellow) quadrant
-    quadrantColors["ne"] = d3.scale.linear()
+    var colors = {
+      dark:{},
+      light:{}
+    }
+
+    //color scales for dark background
+    colors.dark.ne = d3.scale.linear()
         .domain([0,45,90])
         .range(["#ffb600", "#f6e700", "#d0e616"]) ;
 
-    quadrantColors["se"] = d3.scale.linear()
+    colors.dark.se = d3.scale.linear()
         .domain([90,135,180])
         .range(["#77b621", "#229017", "#009348"]) ;
 
-    quadrantColors["sw"] = d3.scale.linear()
+    colors.dark.sw = d3.scale.linear()
         .domain([180,225,270])
         .range(["#039290", "#1a5da4", "#7b36c8"]) ;
 
-    quadrantColors["nw"] = d3.scale.linear()
+    colors.dark.nw = d3.scale.linear()
         .domain([270,315,360])
         .range(["#cd1e74", "#f1321a", "#ff7a00"]) ;
 
-    var baseColor = "#fafafa" ;
+    colors.dark.baseColor = "#fafafa" ;
+
+
+
+    //color scales for light background
+    colors.light.ne = d3.scale.linear()
+        .domain([0,45,90])
+        .range(["#ffae00", "#f1d30b", "#c7d307"]) ;
+
+    colors.light["se"] = d3.scale.linear()
+        .domain([90,135,180])
+        .range(["#77b621", "#229017", "#009348"]) ;
+
+    colors.light["sw"] = d3.scale.linear()
+        .domain([180,225,270])
+        .range(["#039290", "#1a5da4", "#7b36c8"]) ;
+
+    colors.light["nw"] = d3.scale.linear()
+        .domain([270,315,360])
+        .range(["#cd1e74", "#f1321a", "#ff7a00"]) ;    
+
+    colors.light.baseColor = "#bbbbbb" ;
 
     //determines how strongly we mix with grey in the center of the quadrant
     var lightenScale = d3.scale.linear()
@@ -538,7 +563,11 @@ var moods = [ {
             return Math.sqrt(Math.pow(valence, 2) + Math.pow(arousal, 2));
         },
 
-        getColor: function(valence, arousal) {
+        getColor: function(valence, arousal, background) {
+
+            var bg = background ;
+            if (!bg)
+              bg = 'light' ;
 
             var quadrant = getQuadrant(valence, arousal) ;
 
@@ -546,9 +575,9 @@ var moods = [ {
 
             var intensity = normalizeDistance(this.getIntensity(valence, arousal)) ;
 
-            var color = tinycolor(quadrantColors[quadrant](angle))  ;
+            var color = tinycolor(colors[bg][quadrant](angle))  ;
 
-            color = tinycolor.mix(color, baseColor, lightenScale(intensity)) ;
+            color = tinycolor.mix(color, colors[bg].baseColor, lightenScale(intensity)) ;
 
             return color.toHexString() ;
         }
@@ -560,23 +589,43 @@ var moods = [ {
 
 
 
-.directive('moodCanvas', ["MoodGrid", function (MoodGrid) {
+.directive('moodCanvas', ["MoodData", function (MoodData) {
 
+  var defaultConfig = {
+    showAxii : true,
+    showPrompt : true,
+    showSquares : true,
+    readOnly : false,
+    toggle: true,
+    background: "light"
+  } ;
 	
 	return {
 		restrict: 'E',
 		scope: {
-			mood:'='
+			selected:'=?',
+      hovered:'=?',
+      counts:'=?',
+      config:'=?'
 		},
 		link: function (scope, element, attrs) {
 
+      var conf = defaultConfig;
+
+
 			var dimensions = {width:300, height: 300} ;
+      var cellWidth = dimensions.width/10 ;
 
 			var xScale = d3.scale.linear().domain([-1,1]).range([0,dimensions.width]) ;
 			var yScale = d3.scale.linear().domain([-1,1]).range([dimensions.height,0]) ;
 
+      //used to scale radius of circles, based on mood count
+      //need to know max mood count to set domain
+      var rScale = d3.scale.linear().range([0.3*cellWidth, 0.8*cellWidth]) ;
+
 			var drag = d3.behavior.drag()
-				.on("drag", clicked) ;
+        .on("dragstart", dragstarted)
+				.on("drag", dragged) ;
 
 			var container = d3.select(element[0])
 			   .append("div")
@@ -591,45 +640,57 @@ var moods = [ {
 			var canvas = svg.append("rect")
 			    .attr("class", "canvas")
 			    .on("click", clicked)
+          .on("mousemove", hovered)
+          .on("mouseout", unhovered)
 			    .call(drag)
 			    .style("pointer-events", "all")
-			    .style("cursor", "pointer")
 			    .style("fill", "none");
 
 			var moodContainer = svg.append("g")
 				.style("pointer-events", "none") ;
 
-			var moods = moodContainer.selectAll(".mood")
-				.data(MoodGrid.getMoods())
+			var mood = moodContainer.selectAll(".mood")
+				.data(MoodData.getMoods())
 				.enter()
-					.append("rect")
-					.attr("class", ".mood")
-					.attr("width", function(d) { return moodWidth(d) })
-					.attr("height", function(d) { return moodHeight(d) })
-					.attr("rx",function(d) { return moodCornerRadius(d) })
-				    .attr("ry",function(d) { return moodCornerRadius(d) })
-					.attr("x", function(d) { return moodX(d) })
-					.attr("y", function(d) { return moodY(d) })
-					.style("fill", function(d) { return MoodGrid.getColor(d.valence, d.arousal)}) ;
+          .append("g")
+            .attr("class", ".mood") ;
+
+      var moodFill = mood
+				.append("rect")
+					.attr("width", moodWidth)
+					.attr("height", moodHeight)
+					.attr("rx", moodCornerRadius)
+				  .attr("ry", moodCornerRadius)
+					.attr("x", moodX)
+					.attr("y", moodY)
+					.style("fill", moodColor) ;
+
+      var moodHalo = mood
+        .append("circle")
+          .attr("cx", function(d) { return xScale(d.valence) })
+          .attr("cy", function(d) { return yScale(d.arousal) })
+          .style("fill", "none")
+          .style("stroke", moodColor) ;
+
+
+
+
+
 
 			var promptContainer = svg.append("g")
-				.style("pointer-events", "none") 
-				.attr("class", "prompts")
-				.style("pointer-events", "none") ;
-
-			var centralPromptContainer = promptContainer.append("g")
-				.attr("class", "centralPrompt")
-
-			centralPromptContainer.append("circle")
+				.attr("class", "prompt") 
+        .style("pointer-events", "none") ;
+        
+			promptContainer.append("circle")
 				.attr("r", 40) ;
 
-			centralPromptContainer
+			promptContainer
 				.append("text")
 				.attr("text-anchor", "middle")
 				.attr("y", -5)
 				.text("plot") ;
 
-			centralPromptContainer
+			promptContainer
 				.append("text")
 				.attr("text-anchor", "middle")
 				.attr("dy",".71em")
@@ -637,55 +698,172 @@ var moods = [ {
 				.text("mood") ;
 
 
-			var pHigh = promptContainer.append("text")
+      var axiiContainer = svg.append("g")
+        .attr("class", "axii")
+        .style("pointer-events", "none") ;
+
+			var pHigh = axiiContainer.append("text")
 				.attr("text-anchor", "middle")
 				.attr("dy",".71em")
 				.text("high energy")
 				.style("pointer-events", "none") ;
 
-			var pLow = promptContainer.append("text")
+			var pLow = axiiContainer.append("text")
 				.attr("text-anchor", "middle")
 				.text("low energy")
 				.style("pointer-events", "none") ;
 
-			var pBad = promptContainer.append("text")
+			var pBad = axiiContainer.append("text")
 				.attr("text-anchor", "start")
 				.attr("dy",".35em")
 				.text("bad")
 				.style("pointer-events", "none") ;
 
-			var pGood = promptContainer.append("text")
+			var pGood = axiiContainer.append("text")
 				.attr("text-anchor", "end")
 				.attr("dy",".35em")
 				.text("good")
 				.style("pointer-events", "none") ;
 
-			scope.$watch("mood", function() {
+			scope.$watch("selected", function() {
+
+        if (!conf) return ;
+
 				redraw() ;
 			},true) ;
 
+      scope.$watch("counts", function() {
+
+        //console.log("counts changed") ;
+
+        if (!conf) return ;
+
+        if (!scope.counts) {
+          redraw() ;
+          return ;
+        }
+
+        var counts = _.values(scope.counts) ;
+
+        var maxCount = _.max(counts) ;
+        var minCount = 0 
+        if (counts.length == 100)
+          minCount = _.min(counts) ;
+
+        //console.log(" min:" + minCount + "   max:" + maxCount) ;
+
+        rScale.domain([minCount,maxCount]) ;
+        redraw() ;
+
+      }, true) ;
+
+      scope.$watch("config", function() {
+
+        //console.log(conf) ;
+        
+        if (!scope.config) {
+          conf = defaultConfig ;
+        } else {
+
+          conf = _.clone(scope.config) ;
+          _.each(defaultConfig, function(value, key) {
+            if (conf[key] === null || conf[key] === undefined)
+              conf[key] = value ;
+          }) ;
+        }
+
+        redraw() ;
+      }, true)
+
+      function dragstarted() {
+        //console.log("starting drag") ;
+        d3.event.sourceEvent.stopPropagation();
+      }
+
+      function dragged() {
+
+        if (conf.readOnly)
+          return ;
+
+        var coords = d3.mouse(this) ;
+
+        var valence = xScale.invert(coords[0]) ;
+        var arousal = yScale.invert(coords[1]) ;
+
+        var mood = MoodData.getNearest(valence, arousal) ;
+
+        scope.$apply(function() {
+          scope.selected = mood ;
+        }) ;
+
+      }
 
 			function clicked() {
+
+        if (conf.readOnly)
+          return ;
+
+        if (d3.event.defaultPrevented) 
+          return;
 
 				var coords = d3.mouse(this) ;
 
 				var valence = xScale.invert(coords[0]) ;
 				var arousal = yScale.invert(coords[1]) ;
 
-				var mood = MoodGrid.getNearest(valence, arousal) ;
+				var mood = MoodData.getNearest(valence, arousal) ;
 
-				scope.$apply(function() {
-					scope.mood = mood ;
-				}) ;
+        //console.log(mood) ;
+
+        if (scope.selected && scope.selected.name == mood.name) {
+
+          if (conf.toggle)
+            scope.$apply(function() {
+              scope.selected = undefined ;
+            }) ;
+
+        } else {
+  				scope.$apply(function() {
+  					scope.selected = mood ;
+  				}) ;
+        }
 			}
+
+      function hovered() {
+
+        var coords = d3.mouse(this) ;
+
+        var valence = xScale.invert(coords[0]) ;
+        var arousal = yScale.invert(coords[1]) ;
+
+        var mood = MoodData.getNearest(valence, arousal) ;
+
+        scope.$apply(function() {
+          scope.hovered = mood ;
+        }) ;
+      }
+
+      function unhovered() {
+
+        //console.log("unhovering") ;
+
+        scope.$apply(function() {
+          scope.hovered = undefined ;
+        }) ;
+      }
 
 			function redraw() {
 
 				canvas
 					.attr("width", dimensions.width)
-				    .attr("height", dimensions.height) ;
+				  .attr("height", dimensions.height) ;
 
-				centralPromptContainer
+        if (conf.readOnly)
+          canvas.style("cursor", "default") ;
+        else
+          canvas.style("cursor", "pointer") ;
+
+				promptContainer
 					.attr("transform", "translate(" + dimensions.width/2 + "," + dimensions.height/2 + ")");
 
 				pHigh
@@ -704,20 +882,37 @@ var moods = [ {
 					.attr("x", dimensions.width-5)
 					.attr("y", dimensions.height/2) ;
 
-				moods
+				moodFill
 				    .transition()
 				    .duration(500)
-				    .attr("width", function(d) { return moodWidth(d) })
-					.attr("height", function(d) { return moodHeight(d) })
-					.attr("rx",function(d) { return moodCornerRadius(d) })
-				    .attr("ry",function(d) { return moodCornerRadius(d) })
-					.attr("x", function(d) { return moodX(d) })
-					.attr("y", function(d) { return moodY(d) }) ;
+				    .attr("width", moodWidth)
+					.attr("height", moodHeight)
+					.attr("rx", moodCornerRadius)
+				    .attr("ry", moodCornerRadius)
+					.attr("x", moodX)
+					.attr("y", moodY)
+          .style("fill", moodColor) ;
 
-				if (!scope.mood)
+        moodHalo
+          .transition()
+          .duration(500)
+          .attr("r", moodHaloRadius)
+          .style("stroke", moodColor) ;
+
+				if (scope.selected || !conf.showPrompt)
+          promptContainer.attr("display", "none") ;
+        else
 					promptContainer.attr("display", "block") ;
-				else
-					promptContainer.attr("display", "none") ;
+				
+				
+
+
+        if (scope.selected || !conf.showAxii)
+          axiiContainer.attr("display", "none") ;
+        else
+          axiiContainer.attr("display", "block") ;
+        
+          
 			}
 
 
@@ -733,37 +928,343 @@ var moods = [ {
 
 			function moodWidth(mood) {
 
-				var min = Math.min(dimensions.width, dimensions.height) ;
+        var count = undefined ;
+        if (scope.counts)
+          if (scope.counts[mood.name])
+            count = scope.counts[mood.name] ;
+          else
+            count = 0 ;
 
-				if (scope.mood) {
-					if (scope.mood.name === mood.name)
-						return (min/10) ;
+
+
+
+				if (scope.selected && count == undefined) {
+					if (scope.selected.name === mood.name)
+						return cellWidth * 0.8 ;
 					else
-						return (min/10) * 0.5 ;
+						return cellWidth * 0.5 ;
 				} else {
-					return dimensions.height/10 ;
+
+          if (count === undefined)
+            if (conf.showSquares)
+              return cellWidth ;
+            else
+              return cellWidth * 0.8 ;
+          else
+            return rScale(count) ;
+
 				}
+
+
+
 			}
 
 			function moodHeight(mood) {
 
-				if (scope.mood) 
-					return moodWidth(mood) ;
-				else
-					return dimensions.height/10 ;
+				return moodWidth(mood) ;
 			}
 
 			function moodCornerRadius(mood) {
 
-				if (scope.mood)
+				if (scope.selected || scope.counts || !conf.showSquares)
 					return moodWidth(mood) ;
 				else
 					return 0 ;
 			}
+
+      function moodHaloRadius(mood) {
+
+        if (scope.selected && scope.selected.name === mood.name)
+          return (moodWidth(mood)/2) + 2 ;
+        else
+          return moodWidth(mood)/2 - 1 ;
+      }
+
+      function moodColor(mood) {
+
+        return MoodData.getColor(mood.valence, mood.arousal, conf.background) ;
+      }
 
 
 
 		}
 
 	}
+}])
+
+
+.directive('moodMatrix', ["MoodData", function (MoodData) {
+
+  var defaultConfig = {
+    readOnly : false,
+    followCanvasHover: true,
+    background: "light",
+    inactiveColor: "#ccc"
+  } ;
+  
+  return {
+    restrict: 'E',
+    scope: {
+      selected:'=',
+      hoveredInCanvas:'=?',
+      hoveredInMatrix:'=?',
+      config:'=?'
+    },
+    link: function (scope, element, attrs) {
+
+      var conf = defaultConfig ;
+      var hoverTimeoutId ;
+
+      var dimensions = {width:300, height: 90} ;
+      var cellDimensions = {width:dimensions.width/3, height:dimensions.height/3} ;
+
+      var xScale = d3.scale.linear().domain([-1.2,1.2]).range([0,cellDimensions.width*12]) ;
+      var yScale = d3.scale.linear().domain([-1.2,1.2]).range([cellDimensions.height*12,0]) ;
+
+      var panX = d3.scale.linear().domain([-1, 1]).range([-cellDimensions.width*0.5, cellDimensions.width*9.5]) ;
+      var panY = d3.scale.linear().domain([-1, 1]).range([cellDimensions.height*9.5, -cellDimensions.height*0.5]) ;
+
+
+      var container = d3.select(element[0])
+         .append("div")
+         .classed("svg-container", true) ;
+
+      var svg = container.append("svg")
+        .attr("preserveAspectRatio", "xMinYMin meet")
+          .attr("cursor", "default")
+          .attr("viewBox", "0 0 300 90")
+          .classed("svg-content-responsive", true) ;
+
+      var canvas = svg.append("rect")
+          .attr("class", "canvas")
+          .style("fill", "none");
+
+      var cellContainer = svg.append("g")
+        .attr("mouseout", unhover)
+        .attr("transform", "translate(" + -panX(0) + "," + -panY(0) + ")") ;
+
+      var cellData = [] ;
+      var boundaryCellData = [] ;
+
+
+      for (var valence=-1.1 ; valence<=1.1 ; valence = valence + 0.2) {
+
+        for (var arousal=1.1 ; arousal>=-1.1 ; arousal = arousal -0.2) {
+
+          if (valence > -1 && valence < 1 && arousal > -1 && arousal < 1) {
+            var mood = MoodData.getNearest(valence, arousal) ;
+
+            cellData.push(mood) ;
+          } else {
+            boundaryCellData.push({valence: valence, arousal: arousal}) ;
+          }
+        }
+      }
+
+
+      var moodCell = cellContainer.selectAll(".mood-cell")
+        .data(cellData)
+        .enter()
+          .append("g")
+            .attr("class", ".cell")
+            .attr("transform", function(d) { return "translate(" + xScale(d.valence) + "," + yScale(d.arousal) + ")"}); 
+
+      
+      var moodRect = moodCell.append("rect")
+        .attr("x", -cellDimensions.width/2) 
+        .attr("y", -cellDimensions.height/2) 
+        .attr("width", cellDimensions.width)
+        .attr("height", cellDimensions.height)
+        .on("click", click)
+        .on("mouseover", hover)
+        .on("mouseout",unhover)
+        .style("pointer-events", "all")
+        .style("fill", "none")
+        .style("cursor", cursor)
+        .style("stroke", "none") ;
+      
+
+      var moodText = moodCell.append("text")
+        .attr("text-anchor", "middle")
+        .attr("dy",".35em")
+        .style("fill", fill)
+        .style("stroke", stroke)
+        .style("stroke-width", strokeWidth)
+        .style("font-size", fontSize)
+        .style("pointer-events", "none")
+        .text(function(d) {return d.name}) ;
+
+
+      var boundaryCell = cellContainer.selectAll(".boundary-cell")
+        .data(boundaryCellData)
+        .enter()
+          .append("circle")
+          .attr("cx", function(d) {return xScale(d.valence)})
+          .attr("cy", function(d) {return yScale(d.arousal)})
+          .attr("r", 2)
+          .style("pointer-events", "none")
+          .style("fill", conf.inactiveColor) ;
+
+
+      scope.$watch("selected", function() {
+
+        redraw() ;
+
+      }, true) ;
+
+      scope.$watch("hoveredInCanvas", function() {
+
+        if (!scope.hoveredInCanvas) {
+
+          //react immediately if suddenly not hovering anything
+          redraw() ;
+        } else {
+          //wait for a bit before reacting to a new hover (so we don't constantly bounce around)
+
+          if (hoverTimeoutId) {
+            clearTimeout(hoverTimeoutId) ;
+            hoverTimeoutId = undefined ;
+          }
+
+          hoverTimeoutId = setTimeout(function() {
+            hoverTimeoutId = undefined ;
+            redraw() ;
+          }, 200) ;
+        }
+      }, true) ;
+
+      scope.$watch("config", function() {
+
+        if (!scope.config) {
+          conf = defaultConfig ;
+        } else {
+
+          conf = _.clone(scope.config) ;
+          _.each(defaultConfig, function(value, key) {
+            if (conf[key] === null || conf[key] === undefined)
+              conf[key] = value ;
+          }) ;
+        }
+
+        redraw() ;
+      }, true) ;
+
+      function redraw() {
+
+        var valence = 0 ;
+        var arousal = 0 ;
+
+        if (conf.followCanvasHover && scope.hoveredInCanvas) {
+          valence = scope.hoveredInCanvas.valence ;
+          arousal = scope.hoveredInCanvas.arousal ;
+        } else if (scope.selected) {
+          valence = scope.selected.valence ;
+          arousal = scope.selected.arousal ;
+        }
+
+        cellContainer
+          .transition()
+          .duration(500)
+          .ease("cubic-out")
+          .attr("transform", "translate(" + -panX(valence) + "," + -panY(arousal) + ")")
+          .attr("opacity", opacity) ;
+
+        moodRect
+          .style("cursor", cursor) ;
+          
+        moodText
+          .transition()
+          .duration(500)
+          .style("fill", fill)
+          .style("stroke", stroke)
+          .style("stroke-width", strokeWidth)
+          .style("font-size", fontSize) ;
+          
+      }
+
+
+      function isSelectedOrHovered(mood) {
+
+        if (conf.followCanvasHover && scope.hoveredInCanvas && scope.hoveredInCanvas.name == mood.name)
+          return true ;
+
+        return ((!conf.followCanvasHover || !scope.hoveredInCanvas) && scope.selected && scope.selected.name == mood.name) ;
+      }
+
+      function opacity() {
+        if (scope.selected || (conf.followCanvasHover && scope.hoveredInCanvas)) 
+          return 1 ;
+        else
+          return 0 ;
+      }
+
+      function fill(mood) {
+
+          if (isSelectedOrHovered(mood)) 
+            return MoodData.getColor(mood.valence, mood.arousal, conf.background) ;
+          else
+            return conf.inactiveColor ;
+      }
+
+      function stroke(mood) {
+
+        if (isSelectedOrHovered(mood)) 
+            return MoodData.getColor(mood.valence, mood.arousal, conf.background) ;
+          else
+            return conf.inactiveColor ;
+      }
+
+      function strokeWidth(mood) {
+
+        if (isSelectedOrHovered(mood)) 
+            return 1
+          else
+            return 0 ;
+      }
+
+      function fontSize(mood) {
+          if (isSelectedOrHovered(mood))
+            return 18 ;
+          else
+            return 15 ;
+      }
+
+      function cursor() {
+          if (!conf || conf.readOnly)
+            return "default"
+          
+          return "pointer"
+      }
+
+      function click(mood) {
+
+        if (!conf || conf.readOnly)
+          return ;
+
+        scope.$apply(function() {
+          scope.selected = mood ;
+        }) ;
+      }
+
+      function hover(mood) {
+
+        scope.$apply(function() {
+          scope.hoveredInMatrix = mood ;
+        }) ;
+      }
+
+      function unhover(mood) {
+
+        if (!scope.hoveredInMatrix)
+          return ;
+
+        scope.$apply(function() {
+          scope.hoveredInMatrix = undefined ;
+        }) ;
+      }
+
+    }
+
+    
+  }
 }])
