@@ -1,0 +1,21 @@
+.clickable {
+	cursor: pointer;
+}
+
+
+.affix {
+	position: fixed;
+	width:300px ;
+	top: 50px;
+}
+
+table td {
+	padding: 2px 10px;
+	vertical-align: top;
+}
+
+label {
+	font-weight: normal ;
+	cursor: pointer;
+	margin-left: 5px;
+}
