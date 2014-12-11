@@ -11,7 +11,7 @@ This requires [AngularJS](https://angularjs.org/). In addition, you will need:
 
  * [D3](http://d3js.org/)
  * [TinyColor](http://bgrins.github.io/TinyColor/)
- * [Underscore.js](http://underscorejs.org/)
+ * [Lo-Dash](http://lodash.com)
 
 
 ## Installation and usage
@@ -20,7 +20,7 @@ This requires [AngularJS](https://angularjs.org/). In addition, you will need:
 
 2. Include `angular-mood.js` and `angular-mood.css`. They should be located in `bower_components/angular-mood`
 
-3. Include the dependencies `d3.min.js` (which should be in `bower_components/d3`), `tinycolor.js` (`bower_components/tinycolor`) and `underscore-min.js` (`bower_components/underscore`)
+3. Include the dependencies `d3.min.js` (which should be in `bower_components/d3`), `tinycolor.js` (`bower_components/tinycolor`) and `lodash.min.js` (`bower_components/lodash/dist/`)
 
 4. Add `angular-mood` as a module dependency to your app
 

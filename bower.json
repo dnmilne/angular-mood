@@ -5,7 +5,7 @@
     "angular": "latest",
     "d3": "latest",
     "tinycolor": "latest",
-    "underscore": "latest"
+    "lodash": "latest"
   },
   "main": "angular-mood.js",
   "authors": [
